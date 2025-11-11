@@ -141,6 +141,24 @@ podman manifest push igoroschsimoes/simpledotnetsqs:v1 \
   docker://igoroschsimoes/simpledotnetsqs:v1
 ```
 
+### Using the Build Script (Recommended)
+
+The repository includes a script that works with both Docker and Podman:
+
+```bash
+# Using Podman
+./build-multiarch.sh podman
+
+# Using Docker
+./build-multiarch.sh docker
+
+# Custom image name and version
+./build-multiarch.sh podman myregistry/myapp v2.0
+./build-multiarch.sh docker myregistry/myapp v2.0
+```
+
+**Note:** Building AMD64 on ARM64 Mac with Podman will be slow due to emulation. Consider using Docker buildx or GitHub Actions for faster multi-arch builds.
+
 Run the container locally:
 
 ```bash
