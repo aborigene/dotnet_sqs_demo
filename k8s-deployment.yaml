@@ -1,0 +1,140 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sqs-demo
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sqs-demo-config
+  namespace: sqs-demo
+data:
+  AWS__SQS__QueueUrl: "https://sqs.us-east-1.amazonaws.com/YOUR_ACCOUNT_ID/YOUR_QUEUE_NAME"
+  ASPNETCORE_ENVIRONMENT: "Production"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aws-credentials
+  namespace: sqs-demo
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: "YOUR_AWS_ACCESS_KEY_ID"
+  AWS_SECRET_ACCESS_KEY: "YOUR_AWS_SECRET_ACCESS_KEY"
+  AWS_REGION: "us-east-1"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sqs-demo
+  namespace: sqs-demo
+  labels:
+    app: sqs-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sqs-demo
+  template:
+    metadata:
+      labels:
+        app: sqs-demo
+    spec:
+      containers:
+      - name: sqs-demo
+        image: igoroschsimoes/simpledotnetsqs:v1
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        - name: ASPNETCORE_URLS
+          value: "http://+:8080"
+        - name: ASPNETCORE_ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: sqs-demo-config
+              key: ASPNETCORE_ENVIRONMENT
+        - name: AWS__SQS__QueueUrl
+          valueFrom:
+            configMapKeyRef:
+              name: sqs-demo-config
+              key: AWS__SQS__QueueUrl
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: AWS_ACCESS_KEY_ID
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: AWS_SECRET_ACCESS_KEY
+        - name: AWS_REGION
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: AWS_REGION
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sqs-demo-service
+  namespace: sqs-demo
+  labels:
+    app: sqs-demo
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: sqs-demo
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sqs-demo-ingress
+  namespace: sqs-demo
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: sqs-demo.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: sqs-demo-service
+            port:
+              number: 80
