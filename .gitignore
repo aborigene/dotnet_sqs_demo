@@ -1,3 +1,4 @@
+# .NET build artifacts
 bin/
 obj/
 *.user
@@ -5,3 +6,26 @@ obj/
 .vs/
 .vscode/
 *.userprefs
+
+# Producer specific
+producer/bin/
+producer/obj/
+
+# Consumer specific
+consumer/bin/
+consumer/obj/
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets (do not commit credentials)
+appsettings.Production.json
+**/appsettings.Production.json
+

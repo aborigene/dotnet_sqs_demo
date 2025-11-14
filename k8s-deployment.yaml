@@ -9,8 +9,9 @@ metadata:
   name: sqs-demo-config
   namespace: sqs-demo
 data:
-  AWS__SQS__QueueUrl: "https://sqs.us-east-1.amazonaws.com/YOUR_ACCOUNT_ID/YOUR_QUEUE_NAME"
+  AWS__SQS__QueueUrl: "https://sqs.us-east-1.amazonaws.com/537309256512/BankQueueFinal"
   ASPNETCORE_ENVIRONMENT: "Production"
+  DOTNET_ENVIRONMENT: "Production"
 ---
 apiVersion: v1
 kind: Secret
@@ -19,38 +20,41 @@ metadata:
   namespace: sqs-demo
 type: Opaque
 stringData:
-  AWS_ACCESS_KEY_ID: "YOUR_AWS_ACCESS_KEY_ID"
-  AWS_SECRET_ACCESS_KEY: "YOUR_AWS_SECRET_ACCESS_KEY"
+  AWS_ACCESS_KEY_ID: "ASIAX2GRATNABDTZH74T"
+  AWS_SECRET_ACCESS_KEY: "fX6qmWS2DTDMH7RJfTDruapqJjsjhqt8Rkqm/eQz"
   AWS_REGION: "us-east-1"
 ---
+# Producer Deployment (API that sends messages to SQS)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: sqs-demo
+  name: sqs-producer
   namespace: sqs-demo
   labels:
-    app: sqs-demo
+    app: sqs-producer
+    component: producer
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: sqs-demo
+      app: sqs-producer
   template:
     metadata:
       labels:
-        app: sqs-demo
+        app: sqs-producer
+        component: producer
     spec:
       containers:
-      - name: sqs-demo
-        image: igoroschsimoes/simpledotnetsqs:v1
+      - name: sqs-producer
+        image: igoroschsimoes/simpledotnetsqs-producer:v1
         imagePullPolicy: Always
         ports:
-        - containerPort: 8080
+        - containerPort: 5000
           name: http
           protocol: TCP
         env:
         - name: ASPNETCORE_URLS
-          value: "http://+:8080"
+          value: "http://+:5000"
         - name: ASPNETCORE_ENVIRONMENT
           valueFrom:
             configMapKeyRef:
@@ -86,7 +90,7 @@ spec:
         livenessProbe:
           httpGet:
             path: /health
-            port: 8080
+            port: 5000
           initialDelaySeconds: 10
           periodSeconds: 30
           timeoutSeconds: 5
@@ -94,34 +98,99 @@ spec:
         readinessProbe:
           httpGet:
             path: /health
-            port: 8080
+            port: 5000
           initialDelaySeconds: 5
           periodSeconds: 10
           timeoutSeconds: 3
           failureThreshold: 3
       restartPolicy: Always
 ---
+# Consumer Deployment (Worker that processes messages from SQS)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sqs-consumer
+  namespace: sqs-demo
+  labels:
+    app: sqs-consumer
+    component: consumer
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sqs-consumer
+  template:
+    metadata:
+      labels:
+        app: sqs-consumer
+        component: consumer
+    spec:
+      containers:
+      - name: sqs-consumer
+        image: igoroschsimoes/simpledotnetsqs-consumer:v1
+        imagePullPolicy: Always
+        env:
+        - name: DOTNET_ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: sqs-demo-config
+              key: DOTNET_ENVIRONMENT
+        - name: AWS__SQS__QueueUrl
+          valueFrom:
+            configMapKeyRef:
+              name: sqs-demo-config
+              key: AWS__SQS__QueueUrl
+        - name: AWS__SQS__MaxNumberOfMessages
+          value: "10"
+        - name: AWS__SQS__WaitTimeSeconds
+          value: "20"
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: AWS_ACCESS_KEY_ID
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: AWS_SECRET_ACCESS_KEY
+        - name: AWS_REGION
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: AWS_REGION
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+      restartPolicy: Always
+---
+# Service for Producer (only the producer needs to be exposed)
 apiVersion: v1
 kind: Service
 metadata:
-  name: sqs-demo-service
+  name: sqs-producer-service
   namespace: sqs-demo
   labels:
-    app: sqs-demo
+    app: sqs-producer
 spec:
   type: ClusterIP
   ports:
   - port: 80
-    targetPort: 8080
+    targetPort: 5000
     protocol: TCP
     name: http
   selector:
-    app: sqs-demo
+    app: sqs-producer
 ---
+# Ingress for Producer API
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: sqs-demo-ingress
+  name: sqs-producer-ingress
   namespace: sqs-demo
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
@@ -135,6 +204,6 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: sqs-demo-service
+            name: sqs-producer-service
             port:
               number: 80
