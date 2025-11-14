@@ -1,0 +1,273 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kafka-demo
+---
+# Kafka StatefulSet Service (Headless)
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: kafka-demo
+  labels:
+    app: kafka
+spec:
+  ports:
+  - port: 9092
+    name: kafka
+  clusterIP: None
+  selector:
+    app: kafka
+---
+# Kafka StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: kafka-demo
+spec:
+  serviceName: kafka
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      containers:
+      - name: kafka
+        image: confluentinc/cp-kafka:7.5.0
+        ports:
+        - containerPort: 9092
+          name: kafka
+        - containerPort: 9093
+          name: kafka-internal
+        env:
+        - name: KAFKA_NODE_ID
+          value: "1"
+        - name: KAFKA_PROCESS_ROLES
+          value: "broker,controller"
+        - name: KAFKA_LISTENERS
+          value: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093"
+        - name: KAFKA_ADVERTISED_LISTENERS
+          value: "PLAINTEXT://kafka-0.kafka.kafka-demo.svc.cluster.local:9092"
+        - name: KAFKA_CONTROLLER_LISTENER_NAMES
+          value: "CONTROLLER"
+        - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+          value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+        - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+          value: "1@kafka-0.kafka.kafka-demo.svc.cluster.local:9093"
+        - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+          value: "1"
+        - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+          value: "1"
+        - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+          value: "1"
+        - name: KAFKA_LOG_DIRS
+          value: "/var/lib/kafka/data"
+        - name: CLUSTER_ID
+          value: "MkU3OEVBNTcwNTJENDM2Qk"
+        volumeMounts:
+        - name: kafka-data
+          mountPath: /var/lib/kafka/data
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+  volumeClaimTemplates:
+  - metadata:
+      name: kafka-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 2Gi
+---
+# ConfigMap for application configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-demo-config
+  namespace: kafka-demo
+data:
+  Kafka__BootstrapServers: "kafka-0.kafka.kafka-demo.svc.cluster.local:9092"
+  Kafka__Topic: "demo-topic"
+  Kafka__GroupId: "kafka-demo-consumer-group"
+  Kafka__CommitBatchSize: "10"
+  ASPNETCORE_ENVIRONMENT: "Production"
+  DOTNET_ENVIRONMENT: "Production"
+---
+# Producer Deployment (API that sends messages to Kafka)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-producer
+  namespace: kafka-demo
+  labels:
+    app: kafka-producer
+    component: producer
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: kafka-producer
+  template:
+    metadata:
+      labels:
+        app: kafka-producer
+        component: producer
+    spec:
+      containers:
+      - name: kafka-producer
+        image: igoroschsimoes/simpledotnetkafka-producer:v1
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        - name: ASPNETCORE_URLS
+          value: "http://+:8080"
+        - name: ASPNETCORE_ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: kafka-demo-config
+              key: ASPNETCORE_ENVIRONMENT
+        - name: Kafka__BootstrapServers
+          valueFrom:
+            configMapKeyRef:
+              name: kafka-demo-config
+              key: Kafka__BootstrapServers
+        - name: Kafka__Topic
+          valueFrom:
+            configMapKeyRef:
+              name: kafka-demo-config
+              key: Kafka__Topic
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+      restartPolicy: Always
+---
+# Consumer Deployment (Worker that processes messages from Kafka)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-consumer
+  namespace: kafka-demo
+  labels:
+    app: kafka-consumer
+    component: consumer
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: kafka-consumer
+  template:
+    metadata:
+      labels:
+        app: kafka-consumer
+        component: consumer
+    spec:
+      containers:
+      - name: kafka-consumer
+        image: igoroschsimoes/simpledotnetkafka-consumer:v1
+        imagePullPolicy: Always
+        env:
+        - name: DOTNET_ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: kafka-demo-config
+              key: DOTNET_ENVIRONMENT
+        - name: Kafka__BootstrapServers
+          valueFrom:
+            configMapKeyRef:
+              name: kafka-demo-config
+              key: Kafka__BootstrapServers
+        - name: Kafka__Topic
+          valueFrom:
+            configMapKeyRef:
+              name: kafka-demo-config
+              key: Kafka__Topic
+        - name: Kafka__GroupId
+          valueFrom:
+            configMapKeyRef:
+              name: kafka-demo-config
+              key: Kafka__GroupId
+        - name: Kafka__CommitBatchSize
+          valueFrom:
+            configMapKeyRef:
+              name: kafka-demo-config
+              key: Kafka__CommitBatchSize
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+      restartPolicy: Always
+---
+# Service for Producer (only the producer needs to be exposed)
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-producer-service
+  namespace: kafka-demo
+  labels:
+    app: kafka-producer
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: kafka-producer
+---
+# Ingress for Producer API
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kafka-producer-ingress
+  namespace: kafka-demo
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: kafka-demo.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kafka-producer-service
+            port:
+              number: 80
