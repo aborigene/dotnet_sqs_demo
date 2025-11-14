@@ -8,12 +8,12 @@ namespace KafkaDemo.Controllers;
 [Route("api/[controller]")]
 public class MessageController : ControllerBase
 {
-    private readonly IKafkaProducerService _kafkaProducerService;
+    private readonly IKafkaService _kafkaService;
     private readonly ILogger<MessageController> _logger;
 
-    public MessageController(IKafkaProducerService kafkaProducerService, ILogger<MessageController> logger)
+    public MessageController(IKafkaService kafkaService, ILogger<MessageController> logger)
     {
-        _kafkaProducerService = kafkaProducerService;
+        _kafkaService = kafkaService;
         _logger = logger;
     }
 
@@ -27,7 +27,7 @@ public class MessageController : ControllerBase
 
         try
         {
-            var messageId = await _kafkaProducerService.SendMessageAsync(request.Id);
+            var messageId = await _kafkaService.SendMessageAsync(request.Id);
             _logger.LogInformation("Message sent to Kafka with ID: {MessageId}", messageId);
             
             return Ok(new 

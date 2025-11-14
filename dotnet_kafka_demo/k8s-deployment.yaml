@@ -3,7 +3,7 @@ kind: Namespace
 metadata:
   name: kafka-demo
 ---
-# Kafka StatefulSet
+# Kafka StatefulSet Service (Headless)
 apiVersion: v1
 kind: Service
 metadata:
@@ -19,6 +19,7 @@ spec:
   selector:
     app: kafka
 ---
+# Kafka StatefulSet
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -87,7 +88,7 @@ spec:
         requests:
           storage: 2Gi
 ---
-# ConfigMap for application
+# ConfigMap for application configuration
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -97,29 +98,33 @@ data:
   Kafka__BootstrapServers: "kafka-0.kafka.kafka-demo.svc.cluster.local:9092"
   Kafka__Topic: "demo-topic"
   Kafka__GroupId: "kafka-demo-consumer-group"
+  Kafka__CommitBatchSize: "10"
   ASPNETCORE_ENVIRONMENT: "Production"
+  DOTNET_ENVIRONMENT: "Production"
 ---
-# Application Deployment
+# Producer Deployment (API that sends messages to Kafka)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: kafka-demo
+  name: kafka-producer
   namespace: kafka-demo
   labels:
-    app: kafka-demo
+    app: kafka-producer
+    component: producer
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: kafka-demo
+      app: kafka-producer
   template:
     metadata:
       labels:
-        app: kafka-demo
+        app: kafka-producer
+        component: producer
     spec:
       containers:
-      - name: kafka-demo
-        image: your-registry/kafka-demo:latest
+      - name: kafka-producer
+        image: igoroschsimoes/simpledotnetkafka-producer:v1
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
@@ -143,11 +148,6 @@ spec:
             configMapKeyRef:
               name: kafka-demo-config
               key: Kafka__Topic
-        - name: Kafka__GroupId
-          valueFrom:
-            configMapKeyRef:
-              name: kafka-demo-config
-              key: Kafka__GroupId
         resources:
           requests:
             memory: "128Mi"
@@ -170,21 +170,104 @@ spec:
           initialDelaySeconds: 5
           periodSeconds: 10
           timeoutSeconds: 3
+          failureThreshold: 3
+      restartPolicy: Always
 ---
-# Service for the application
+# Consumer Deployment (Worker that processes messages from Kafka)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-consumer
+  namespace: kafka-demo
+  labels:
+    app: kafka-consumer
+    component: consumer
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: kafka-consumer
+  template:
+    metadata:
+      labels:
+        app: kafka-consumer
+        component: consumer
+    spec:
+      containers:
+      - name: kafka-consumer
+        image: igoroschsimoes/simpledotnetkafka-consumer:v1
+        imagePullPolicy: Always
+        env:
+        - name: DOTNET_ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: kafka-demo-config
+              key: DOTNET_ENVIRONMENT
+        - name: Kafka__BootstrapServers
+          valueFrom:
+            configMapKeyRef:
+              name: kafka-demo-config
+              key: Kafka__BootstrapServers
+        - name: Kafka__Topic
+          valueFrom:
+            configMapKeyRef:
+              name: kafka-demo-config
+              key: Kafka__Topic
+        - name: Kafka__GroupId
+          valueFrom:
+            configMapKeyRef:
+              name: kafka-demo-config
+              key: Kafka__GroupId
+        - name: Kafka__CommitBatchSize
+          valueFrom:
+            configMapKeyRef:
+              name: kafka-demo-config
+              key: Kafka__CommitBatchSize
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+      restartPolicy: Always
+---
+# Service for Producer (only the producer needs to be exposed)
 apiVersion: v1
 kind: Service
 metadata:
-  name: kafka-demo-service
+  name: kafka-producer-service
   namespace: kafka-demo
   labels:
-    app: kafka-demo
+    app: kafka-producer
 spec:
-  type: LoadBalancer
-  selector:
-    app: kafka-demo
+  type: ClusterIP
   ports:
-  - protocol: TCP
-    port: 80
+  - port: 80
     targetPort: 8080
+    protocol: TCP
     name: http
+  selector:
+    app: kafka-producer
+---
+# Ingress for Producer API
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kafka-producer-ingress
+  namespace: kafka-demo
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: kafka-demo.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kafka-producer-service
+            port:
+              number: 80

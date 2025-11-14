@@ -1,6 +1,6 @@
 namespace KafkaDemo.Services;
 
-public interface IKafkaProducerService
+public interface IKafkaService
 {
     Task<string> SendMessageAsync(string id);
 }

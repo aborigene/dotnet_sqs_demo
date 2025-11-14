@@ -7,9 +7,8 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// Register Kafka services
-builder.Services.AddSingleton<IKafkaProducerService, KafkaProducerService>();
-builder.Services.AddHostedService<KafkaConsumerService>();
+// Register Kafka service
+builder.Services.AddSingleton<IKafkaService, KafkaService>();
 
 var app = builder.Build();
 
